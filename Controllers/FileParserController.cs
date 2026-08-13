@@ -1,4 +1,5 @@
 ﻿using BlueRockLightsOut.Model;
+using BlueRockLightsOut.Model.BlueRockLightsOut.Model;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ApplicationModels;
@@ -32,21 +33,34 @@ namespace BlueRockLightsOut.Controllers
             using var reader = new StreamReader(file.OpenReadStream());
             var content = await reader.ReadToEndAsync();
 
-            var values = content.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            // Handles both \n and \r\n line endings safely.
+            var values = content.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                                 .Select(l => l.TrimEnd('\r'))
+                                 .ToArray();
 
-            var puzzle = PuzzleInput.Parse(values) ;
-
-            var solver = new Solver(puzzle.Depth, puzzle.Rows, puzzle.Cols, puzzle.Board, puzzle.Pieces);
-
-            if (!solver.TrySolve(out (int X, int Y)[] placements))
+            try
             {
-                Console.Error.WriteLine("No solution found.");
-                return Ok(1);
+                var puzzle = PuzzleInput.Parse(values);
+                var solver = new Solver(puzzle.Depth, puzzle.Rows, puzzle.Cols, puzzle.Board, puzzle.Pieces);
+
+                bool solved = solver.TrySolve(out (int X, int Y)[] placements);
+
+                Console.WriteLine($"Nodes explored: {solver.NodesExplored}");
+
+                if (!solved)
+                {
+                    Console.Error.WriteLine("No solution found.");
+                    return Ok(1);
+                }
+
+                Console.WriteLine(string.Join(' ', placements.Select(p => $"{p.X},{p.Y}")));
+                return Ok(string.Join(' ', placements.Select(p => $"{p.X},{p.Y}")));
             }
-
-            Console.WriteLine(string.Join(' ', placements.Select(p => $"{p.X},{p.Y}")));
-
-            return Ok( string.Join(' ', placements.Select(p => $"{p.X},{p.Y}")));
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Exception: {ex}");
+                return StatusCode(500, ex.Message);
+            }
         }
     }
 }
