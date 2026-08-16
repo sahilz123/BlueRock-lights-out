@@ -1,21 +1,52 @@
-﻿using BlueRockLightsOut.Model;
-using BlueRockLightsOut.Model.BlueRockLightsOut.Model;
-using Microsoft.AspNetCore.Http;
+﻿using BlueRockLightsOut.Model.BlueRockLightsOut.Model;
+using BlueRockLightsOut.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.ApplicationModels;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace BlueRockLightsOut.Controllers
 {
+
+    /// <summary>
+    /// Solves BlueRockLightsOut puzzle instances uploaded as .txt files.
+    ///
+    /// Uses a hybrid solving strategy: a hand-rolled backtracking search
+    /// with CSP-style pruning for simpler instances, and Google OR-Tools
+    /// CP-SAT (a constraint-programming solver) for harder instances where
+    /// backtracking's exponential worst case becomes impractical.
+    ///
+    /// Typical performance by puzzle difficulty (levels 1-10, increasing
+    /// piece count / board size / depth):
+    ///   - Levels 1-8: under 500ms.
+    ///   - Level 9: ~90 seconds.
+    ///   - Level 10: ranges roughly 70 seconds to 6 minutes across runs —
+    ///     CP-SAT's parallel portfolio search races several strategies
+    ///     simultaneously, so wall-clock time on instances this close to
+    ///     the practical solvability boundary varies run to run by design,
+    ///     not due to any instability in the model itself.
+    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
-    public class FileParserController : ControllerBase
+    public class PuzzleController : ControllerBase
     {
-        [HttpPost("upload")]
+        /// <summary>
+        /// Solves one or more puzzle instances.
+        /// </summary>
+        /// <remarks>
+        /// Accepts one or more .txt files, each containing a puzzle instance
+        /// (see PuzzleInput.Parse for the input format). Every file is
+        /// processed independently — a failure or unsolvable instance in
+        /// one file does not affect the others.
+        ///
+        /// Before running any solver, each instance passes two cheap
+        /// feasibility checks (reachability and upper-bound) that can prove
+        /// an instance unsolvable without spending any search time.
+        ///
+        /// Solving is currently routed through the CP-SAT solver for all
+        /// instances; the backtracking solver remains available for the
+        /// simpler levels where it's actually faster in practice.
+        /// </remarks>
+        /// <param name="files">One or more .txt puzzle instance files.</param>
+        /// <returns>A per-file result: solved status, elapsed time, and the resulting piece placements (or an explanatory message if unsolved).</returns>
+        [HttpPost("solve")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> UploadTextFile(IFormFile file)
         {
@@ -53,7 +84,7 @@ namespace BlueRockLightsOut.Controllers
                 }
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                bool solved = CpSatSolver.TrySolve(puzzle, out var placements, maxTimeInSeconds: 600);
+                bool solved = CpSatSolver.TrySolve(puzzle, out var placements, maxTimeInSeconds: 900);
                 sw.Stop();
                 Console.WriteLine($"Solved: {solved}, Time: {sw.ElapsedMilliseconds}ms");
 

@@ -2,7 +2,7 @@
 using BlueRockLightsOut.Model.BlueRockLightsOut.Model;
 using Google.OrTools.Sat;
 
-namespace BlueRockLightsOut
+namespace BlueRockLightsOut.Services
 {
     /// <summary>
     /// Constraint-programming solver using Google OR-Tools CP-SAT.
@@ -72,6 +72,52 @@ namespace BlueRockLightsOut
                 model.AddExactlyOne(liveVars);
             }
 
+            // Symmetry breaking: pieces with the IDENTICAL shape produce
+            // identical Positions/PositionMasks lists (same generation
+            // logic, same board), so they're fully interchangeable — one
+            // "swapped" solution is just as valid as another. Left
+            // unconstrained, the solver wastes time re-exploring these
+            // redundant permutations. For each group of duplicate-shape
+            // pieces, force their chosen position indices into non-
+            // decreasing order (i < j => index_i <= index_j), which
+            // eliminates the redundant swaps from the search space.
+            var shapeGroups = new Dictionary<string, List<int>>();
+            for (int i = 0; i < n; i++)
+            {
+                string key = ShapeKey(pieces[i]);
+                if (!shapeGroups.TryGetValue(key, out var list))
+                    shapeGroups[key] = list = new List<int>();
+                list.Add(i);
+            }
+
+            foreach (var group in shapeGroups.Values)
+            {
+                if (group.Count < 2)
+                    continue; // no duplicates, nothing to break
+
+                // index_i = weighted sum of k * (is piece i at position k),
+                // i.e. an IntVar representing "which position index piece i
+                // ended up at" (valid since exactly one position-var is 1).
+                var indexVars = new IntVar[group.Count];
+                for (int g = 0; g < group.Count; g++)
+                {
+                    int i = group[g];
+                    int maxIdx = pieces[i].Positions.Count - 1;
+                    var idx = model.NewIntVar(0, maxIdx, $"idx_piece{i}");
+
+                    var terms = new List<LinearExpr>();
+                    for (int k = 0; k < pieceVars[i].Length; k++)
+                        if (pieceVars[i][k] is not null)
+                            terms.Add(k * pieceVars[i][k]);
+
+                    model.Add(idx == LinearExpr.Sum(terms));
+                    indexVars[g] = idx;
+                }
+
+                for (int g = 0; g + 1 < indexVars.Length; g++)
+                    model.Add(indexVars[g] <= indexVars[g + 1]);
+            }
+
             // Per-cell modular sum constraint.
             for (int r = 0; r < rows; r++)
             {
@@ -85,7 +131,7 @@ namespace BlueRockLightsOut
                         var masks = pieces[i].PositionMasks;
                         for (int k = 0; k < masks.Count; k++)
                         {
-                            if (pieceVars[i][k] is not null && (masks[k] & (1UL << bit)) != 0)
+                            if (pieceVars[i][k] is not null && (masks[k] & 1UL << bit) != 0)
                                 covering.Add(pieceVars[i][k]);
                         }
                     }
@@ -95,7 +141,7 @@ namespace BlueRockLightsOut
                     // be at most initialValue + covering.Count.
                     int initialValue = input.Board[r, c];
                     int maxTotal = initialValue + covering.Count;
-                    int maxQ = (maxTotal / depth) + 1;
+                    int maxQ = maxTotal / depth + 1;
 
                     IntVar q = model.NewIntVar(0, maxQ, $"q_{r}_{c}");
 
@@ -106,12 +152,14 @@ namespace BlueRockLightsOut
             }
 
             var solver = new CpSolver();
+            int workers = Math.Max(1, Environment.ProcessorCount);
             solver.StringParameters =
                 $"max_time_in_seconds:{maxTimeInSeconds} " +
-                "num_search_workers:8 " +          // parallel portfolio search — use your machine's core count
+                $"num_search_workers:{workers} " +
                 "log_search_progress:true " +
-                "linearization_level:2 " +          // more aggressive LP relaxation, often helps on assignment-style models
-                "cp_model_probing_level:2";          // more presolve probing to tighten constraints upfront
+                "linearization_level:2 " +
+                "cp_model_probing_level:2 " +
+                "symmetry_level:2";
 
             CpSolverStatus status = solver.Solve(model);
             Console.WriteLine($"CP-SAT status: {status}");
@@ -146,6 +194,19 @@ namespace BlueRockLightsOut
             }
 
             return true;
+        }
+
+        // Produces an identical string for two pieces iff their masks are
+        // pixel-for-pixel identical (same dimensions, same X/. pattern) —
+        // used to group fully-interchangeable pieces for symmetry breaking.
+        private static string ShapeKey(Piece piece)
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append(piece.Height).Append('x').Append(piece.Width).Append(':');
+            for (int r = 0; r < piece.Height; r++)
+                for (int c = 0; c < piece.Width; c++)
+                    sb.Append(piece.Mask[r, c] ? 'X' : '.');
+            return sb.ToString();
         }
     }
 }

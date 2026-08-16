@@ -1,7 +1,7 @@
 ﻿using BlueRockLightsOut.Model;
 using BlueRockLightsOut.Model.BlueRockLightsOut.Model;
 
-namespace BlueRockLightsOut
+namespace BlueRockLightsOut.Services
 {
     /// <summary>
     /// Cheap, solver-independent sanity checks that can prove a puzzle
@@ -31,7 +31,7 @@ namespace BlueRockLightsOut
                         continue;
 
                     int bit = r * input.Cols + c;
-                    bool reachable = (totalReach & (1UL << bit)) != 0;
+                    bool reachable = (totalReach & 1UL << bit) != 0;
 
                     if (!reachable)
                     {

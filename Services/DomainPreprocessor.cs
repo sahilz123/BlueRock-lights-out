@@ -2,7 +2,7 @@
 using BlueRockLightsOut.Model.BlueRockLightsOut.Model;
 using System.Numerics;
 
-namespace BlueRockLightsOut
+namespace BlueRockLightsOut.Services
 {
     /// <summary>
     /// Static, solver-independent domain reduction. For every candidate
@@ -100,7 +100,7 @@ namespace BlueRockLightsOut
 
                             int r = bit / cols, c = bit % cols;
                             int cellValue = input.Board[r, c];
-                            if ((posMask & (1UL << bit)) != 0)
+                            if ((posMask & 1UL << bit) != 0)
                                 cellValue = (cellValue + 1) % depth;
 
                             if (cellValue == 0)

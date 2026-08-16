@@ -1,7 +1,7 @@
 ﻿using System.Numerics;
 using BlueRockLightsOut.Model;
 
-namespace BlueRockLightsOut
+namespace BlueRockLightsOut.Services
 {
     /// <summary>
     /// Backtracking solver. Places pieces one at a time (most-constrained piece
@@ -52,7 +52,7 @@ namespace BlueRockLightsOut
                 for (int c = 0; c < cols; c++)
                 {
                     if (board[r, c] != 0)
-                        _nonzeroMask |= 1UL << (r * cols + c);
+                        _nonzeroMask |= 1UL << r * cols + c;
                 }
             }
         }
@@ -190,7 +190,7 @@ namespace BlueRockLightsOut
                 int c = bit % _cols;
                 int cellValue = _board[r, c];
 
-                if ((posMask & (1UL << bit)) != 0)
+                if ((posMask & 1UL << bit) != 0)
                     cellValue = (cellValue + 1) % _depth;
 
                 if (cellValue == 0)
