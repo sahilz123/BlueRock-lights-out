@@ -41,16 +41,33 @@ namespace BlueRockLightsOut.Controllers
             try
             {
                 var puzzle = PuzzleInput.Parse(values);
-                var solver = new Solver(puzzle.Depth, puzzle.Rows, puzzle.Cols, puzzle.Board, puzzle.Pieces);
 
-                bool solved = solver.TrySolve(out (int X, int Y)[] placements);
 
-                Console.WriteLine($"Nodes explored: {solver.NodesExplored}");
+                bool ok1 = FeasibilityCheck.ReportUnreachableNonZeroCells(puzzle);
+                bool ok2 = FeasibilityCheck.ReportUpperBoundViolations(puzzle);
+
+                if (!ok1 || !ok2)
+                {
+                    Console.WriteLine("This instance cannot be solved as modeled — stop here, don't run any solver.");
+                    return Ok("This instance cannot be solved as modeled — stop here, don't run any solver.");
+                }
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                bool solved = CpSatSolver.TrySolve(puzzle, out var placements, maxTimeInSeconds: 600);
+                sw.Stop();
+                Console.WriteLine($"Solved: {solved}, Time: {sw.ElapsedMilliseconds}ms");
+
+
+                //var solver = new Solver(puzzle.Depth, puzzle.Rows, puzzle.Cols, puzzle.Board, puzzle.Pieces);
+
+                //bool solved = solver.TrySolve(out (int X, int Y)[] placements);
+
+                //Console.WriteLine($"Nodes explored: {solver.NodesExplored}");
 
                 if (!solved)
                 {
                     Console.Error.WriteLine("No solution found.");
-                    return Ok(1);
+                    return Ok("No solution found.");
                 }
 
                 Console.WriteLine(string.Join(' ', placements.Select(p => $"{p.X},{p.Y}")));

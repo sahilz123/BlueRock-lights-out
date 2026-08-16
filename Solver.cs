@@ -87,43 +87,82 @@ namespace BlueRockLightsOut
             if (unplaced.Count == 0)
                 return _nonzeroMask == 0UL;
 
-            // Most-constrained-variable heuristic: place the piece with the
-            // fewest legal positions next, to prune the search tree faster.
-            int chosen = unplaced[0];
-            int bestCount = _pieces[chosen].Positions.Count;
-            foreach (int idx in unplaced)
+            // Dynamic most-constrained-variable + forward checking.
+            //
+            // For each unplaced piece, count how many of its positions are
+            // still feasible against the *current* board (not just whether
+            // they geometrically fit — that was the old, weaker heuristic).
+            // Two payoffs:
+            //   1. Branch on whichever piece is most constrained right now,
+            //      which tightens pruning as the search gets deeper.
+            //   2. If any unplaced piece has ZERO feasible positions, the
+            //      whole branch is already dead — bail immediately instead
+            //      of wasting time on the other pieces.
+            int chosen = -1;
+            int bestFeasibleCount = int.MaxValue;
+
+            // Cheapest-first ordering (by static geometric count) tends to
+            // establish a tight bestFeasibleCount early, so later, more
+            // "open" pieces short-circuit their counting sooner below.
+            var orderedCandidates = unplaced.OrderBy(idx => _pieces[idx].Positions.Count);
+
+            foreach (int idx in orderedCandidates)
             {
-                if (_pieces[idx].Positions.Count < bestCount)
+                Piece candidate = _pieces[idx];
+
+                // Temporarily exclude this piece from reachCount so the
+                // check reflects "if this piece gets placed, can the
+                // remaining pieces still cover everything else" — the same
+                // semantics used when actually placing a piece below.
+                AdjustReach(candidate.ReachMask, -1);
+
+                int feasibleCount = 0;
+                for (int p = 0; p < candidate.Positions.Count; p++)
                 {
+                    if (PositionFeasible(candidate.PositionMasks[p], candidate.ReachMask))
+                    {
+                        feasibleCount++;
+
+                        // Once this candidate can no longer beat the current
+                        // best, its exact count doesn't matter — stop early.
+                        if (feasibleCount >= bestFeasibleCount)
+                            break;
+                    }
+                }
+
+                AdjustReach(candidate.ReachMask, +1);
+
+                if (feasibleCount == 0)
+                    return false; // empty domain — this branch cannot succeed
+
+                if (feasibleCount < bestFeasibleCount)
+                {
+                    bestFeasibleCount = feasibleCount;
                     chosen = idx;
-                    bestCount = _pieces[idx].Positions.Count;
                 }
             }
 
             var others = unplaced.Where(i => i != chosen).ToList();
             Piece piece = _pieces[chosen];
 
-            // Remove `chosen` from the unplaced set so reachCount reflects
-            // `others` for the duration of this piece's placement attempts.
             AdjustReach(piece.ReachMask, -1);
 
             bool found = false;
             for (int p = 0; p < piece.Positions.Count && !found; p++)
             {
-                (int x, int y) = piece.Positions[p];
                 ulong posMask = piece.PositionMasks[p];
 
-                Apply(posMask, +1);
+                // Skip known-infeasible positions without ever mutating the
+                // board (no wasted Apply/Undo cycle).
+                if (!PositionFeasible(posMask, piece.ReachMask))
+                    continue;
 
-                // Only cells `piece` could reach need checking here — any
-                // other frozen cell was already validated by an earlier
-                // recursive step and can't have changed.
-                if (FrozenCellsOk(piece.ReachMask))
-                {
-                    _result[chosen] = (x, y);
-                    if (Backtrack(others))
-                        found = true;
-                }
+                (int x, int y) = piece.Positions[p];
+
+                Apply(posMask, +1);
+                _result[chosen] = (x, y);
+                if (Backtrack(others))
+                    found = true;
 
                 if (!found)
                     Apply(posMask, -1);
@@ -133,15 +172,13 @@ namespace BlueRockLightsOut
             return found;
         }
 
-        // Generalized version of the old "frozen cell" check. Each remaining
-        // unplaced piece can contribute at most +1 to a cell (if it covers
-        // it). So a cell needs (depth - board[cell]) more +1s to reach zero
-        // (or 0 more if it's already zero) — and that requirement can never
-        // exceed the number of pieces still able to reach it. If it does,
-        // this branch is already dead, regardless of how those pieces get
-        // placed. This subsumes the old reachCount == 0 check (that's just
-        // the case where needed > 0 = reachCount).
-        private bool FrozenCellsOk(ulong pieceReachMask)
+        // Checks, WITHOUT mutating board state, whether placing a piece at
+        // the given position would keep every cell in its reach mask
+        // satisfiable. Each remaining unplaced piece can contribute at most
+        // +1 to a cell (if it covers it), so a cell needs
+        // (depth - hypothetical value) more +1s to reach zero — and that
+        // can never exceed the number of pieces still able to reach it.
+        private bool PositionFeasible(ulong posMask, ulong pieceReachMask)
         {
             ulong mask = pieceReachMask;
             while (mask != 0)
@@ -152,6 +189,9 @@ namespace BlueRockLightsOut
                 int r = bit / _cols;
                 int c = bit % _cols;
                 int cellValue = _board[r, c];
+
+                if ((posMask & (1UL << bit)) != 0)
+                    cellValue = (cellValue + 1) % _depth;
 
                 if (cellValue == 0)
                     continue;
